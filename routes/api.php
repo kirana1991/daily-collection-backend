@@ -18,7 +18,7 @@ Route::apiResource('users', UserController::class)->only(['index', 'store', 'upd
 Route::apiResource('employees', EmployeeController::class)->only(['index', 'store']);
 Route::apiResource('clients', ClientController::class);
 Route::apiResource('loans', LoanController::class);
-Route::apiResource('collections', CollectionController::class)->only(['index', 'store', 'show']);
+Route::apiResource('collections', CollectionController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
 Route::get('/clients/{client}/ledger', [ReceiptController::class, 'ledger']);
-Route::post('/loans/{loan}/receipts', [ReceiptController::class, 'store']);
+Route::post('/collections/{collection}/receipt', [ReceiptController::class, 'store']);
 Route::get('/reports/{type}', [ReportController::class, 'show']);

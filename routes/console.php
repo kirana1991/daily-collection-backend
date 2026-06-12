@@ -23,3 +23,14 @@ Artisan::command('penalties:accrue', function () {
 })->purpose('Accrue overdue loan penalties using whole calendar days');
 
 Schedule::command('penalties:accrue')->dailyAt('00:05');
+
+Artisan::command('installments:rebuild', function () {
+    $rebuilt = 0;
+
+    Loan::query()->eachById(function (Loan $loan) use (&$rebuilt): void {
+        $loan->rebuildCollectionAccounting();
+        $rebuilt++;
+    });
+
+    $this->info("Rebuilt installment accounting for {$rebuilt} loans.");
+})->purpose('Rebuild installment schedules, allocations, and penalties for all loans');

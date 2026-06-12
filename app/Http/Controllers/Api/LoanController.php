@@ -23,9 +23,13 @@ class LoanController extends Controller
         $data['loan_code'] = $data['loan_code'] ?? $this->nextCode();
         $data['penalty_per_day'] = $data['penalty_per_day'] ?? 50;
         $data['status'] = $data['status'] ?? 'active';
+        $data['first_emi_date'] = $data['next_due_date'];
         $data = $this->syncResponsibleUser($data);
 
-        return response()->json(Loan::create($data)->load(['client', 'employee', 'responsibleUser']), 201);
+        $loan = Loan::create($data);
+        $loan->ensureInstallmentSchedule();
+
+        return response()->json($loan->load(['client', 'employee', 'responsibleUser']), 201);
     }
 
     public function show(Loan $loan)
@@ -51,6 +55,7 @@ class LoanController extends Controller
     {
         $data = $this->syncResponsibleUser($request->validate($this->rules(false)));
         $loan->update($data);
+        $loan->rebuildCollectionAccounting();
 
         return $loan->fresh(['client', 'employee', 'responsibleUser', 'collections']);
     }

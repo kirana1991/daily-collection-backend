@@ -23,4 +23,9 @@ class Receipt extends Model
     {
         return $this->belongsTo(Loan::class);
     }
+
+    public function collectionEntry(): BelongsTo
+    {
+        return $this->belongsTo(CollectionEntry::class);
+    }
 }

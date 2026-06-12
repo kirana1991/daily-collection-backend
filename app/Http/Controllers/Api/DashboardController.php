@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\CollectionEntry;
 use App\Models\Employee;
 use App\Models\Loan;
+use App\Models\User;
 
 class DashboardController extends Controller
 {
@@ -24,7 +25,10 @@ class DashboardController extends Controller
                 'week_collection' => CollectionEntry::whereDate('collection_date', '>=', $startOfWeek)->sum('amount_collected'),
                 'month_collection' => CollectionEntry::whereDate('collection_date', '>=', $startOfMonth)->sum('amount_collected'),
                 'active_clients' => Client::whereHas('loans', fn ($query) => $query->where('status', 'active'))->count(),
-                'overdue_clients' => Loan::where('status', 'active')->whereDate('next_due_date', '<', $today)->distinct('client_id')->count('client_id'),
+                'overdue_clients' => $activeLoans
+                    ->filter(fn (Loan $loan) => $loan->overdueInstallments()->isNotEmpty())
+                    ->unique('client_id')
+                    ->count(),
                 'total_outstanding' => round($activeLoans->sum(fn ($loan) => $loan->outstandingEmi()), 2),
                 'penalty_outstanding' => round($activeLoans->sum(fn ($loan) => $loan->outstandingPenalty()), 2),
                 'closed_loans' => Loan::where('status', 'closed')->count(),
@@ -55,34 +59,48 @@ class DashboardController extends Controller
 
                     return $employee;
                 }),
-            'collection_by_executive' => Employee::where('role', 'collection_executive')
-                ->withCount('loans')
+            'collection_by_user' => User::query()
+                ->withCount('collections')
                 ->withSum(['collections as today_collection' => fn ($query) => $query->whereDate('collection_date', $today)], 'amount_collected')
                 ->withSum(['collections as yesterday_collection' => fn ($query) => $query->whereDate('collection_date', $yesterday)], 'amount_collected')
                 ->withSum(['collections as month_collection' => fn ($query) => $query->whereDate('collection_date', '>=', $startOfMonth)], 'amount_collected')
                 ->orderBy('name')
                 ->get()
-                ->map(fn (Employee $employee) => [
-                    'id' => $employee->id,
-                    'name' => $employee->name,
-                    'employee_code' => $employee->employee_code,
-                    'loans_count' => $employee->loans_count,
-                    'today_collection' => round((float) $employee->today_collection, 2),
-                    'yesterday_collection' => round((float) $employee->yesterday_collection, 2),
-                    'month_collection' => round((float) $employee->month_collection, 2),
+                ->map(fn (User $user) => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'role' => $user->role,
+                    'status' => $user->status,
+                    'collections_count' => $user->collections_count,
+                    'today_collection' => round((float) $user->today_collection, 2),
+                    'yesterday_collection' => round((float) $user->yesterday_collection, 2),
+                    'month_collection' => round((float) $user->month_collection, 2),
                 ]),
-            'pending_dues' => $activeLoans->load(['client', 'employee', 'responsibleUser'])->map(fn (Loan $loan) => [
-                'id' => $loan->id,
-                'loan_code' => $loan->loan_code,
-                'client' => $loan->client,
-                'employee' => $loan->employee,
-                'responsible_user' => $loan->responsibleUser,
-                'loan_amount' => (float) $loan->loan_amount,
-                'pending_due' => round($loan->outstandingEmi(), 2),
-                'penalty_due' => round($loan->outstandingPenalty(), 2),
-                'next_due_date' => $loan->next_due_date,
-                'status' => $loan->status,
-            ])->filter(fn (array $loan) => $loan['pending_due'] > 0 || $loan['penalty_due'] > 0)
+            'pending_dues' => $activeLoans->load(['client', 'employee', 'responsibleUser'])->map(function (Loan $loan) {
+                $overdueInstallments = $loan->overdueInstallments();
+                $dueToday = $loan->dueTodayAmount();
+
+                return [
+                    'id' => $loan->id,
+                    'loan_code' => $loan->loan_code,
+                    'client' => $loan->client,
+                    'employee' => $loan->employee,
+                    'responsible_user' => $loan->responsibleUser,
+                    'loan_amount' => (float) $loan->loan_amount,
+                    'pending_due' => round($overdueInstallments->sum(fn ($installment) => $installment->outstandingAmount()), 2),
+                    'overdue_installments_count' => $overdueInstallments->count(),
+                    'overdue_installments' => $overdueInstallments->map(fn ($installment) => [
+                        'id' => $installment->id,
+                        'due_date' => $installment->due_date,
+                        'amount_due' => round($installment->outstandingAmount(), 2),
+                    ])->values(),
+                    'oldest_due_date' => $overdueInstallments->first()?->due_date,
+                    'due_today' => round($dueToday, 2),
+                    'penalty_due' => round($loan->outstandingPenalty(), 2),
+                    'next_due_date' => $loan->next_due_date,
+                    'status' => $loan->status,
+                ];
+            })->filter(fn (array $loan) => $loan['pending_due'] > 0 || $loan['due_today'] > 0 || $loan['penalty_due'] > 0)
                 ->sortByDesc(fn (array $loan) => $loan['pending_due'] + $loan['penalty_due'])
                 ->values(),
             'recent_clients' => Client::with('employee', 'loans')->latest()->limit(5)->get(),

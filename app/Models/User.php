@@ -41,4 +41,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(Loan::class, 'responsible_user_id');
     }
+
+    public function collections(): HasMany
+    {
+        return $this->hasMany(CollectionEntry::class);
+    }
 }

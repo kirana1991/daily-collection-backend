@@ -19,6 +19,11 @@ class Penalty extends Model
         return $this->belongsTo(Loan::class);
     }
 
+    public function installment(): BelongsTo
+    {
+        return $this->belongsTo(LoanInstallment::class, 'loan_installment_id');
+    }
+
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);

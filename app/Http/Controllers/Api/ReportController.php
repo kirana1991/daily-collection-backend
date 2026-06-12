@@ -163,7 +163,9 @@ class ReportController extends Controller
             ->when($request->query('employee_id'), fn ($query, $employeeId) => $query->where('employee_id', $employeeId))
             ->get()
             ->map(function (Loan $loan) {
-                $pendingEmi = round($loan->outstandingEmi(), 2);
+                $overdueInstallments = $loan->overdueInstallments();
+                $pendingEmi = round($overdueInstallments->sum(fn ($installment) => $installment->outstandingAmount()), 2);
+                $dueToday = round($loan->dueTodayAmount(), 2);
                 $pendingPenalty = round($loan->outstandingPenalty(), 2);
 
                 return [
@@ -174,8 +176,16 @@ class ReportController extends Controller
                     'responsible_user' => $loan->responsibleUser,
                     'loan_amount' => (float) $loan->loan_amount,
                     'pending_emi' => $pendingEmi,
+                    'overdue_installments_count' => $overdueInstallments->count(),
+                    'overdue_installments' => $overdueInstallments->map(fn ($installment) => [
+                        'id' => $installment->id,
+                        'due_date' => $installment->due_date,
+                        'amount_due' => round($installment->outstandingAmount(), 2),
+                    ])->values(),
+                    'oldest_due_date' => $overdueInstallments->first()?->due_date,
+                    'due_today' => $dueToday,
                     'pending_penalty' => $pendingPenalty,
-                    'total_due' => round($pendingEmi + $pendingPenalty, 2),
+                    'total_due' => round($pendingEmi + $dueToday + $pendingPenalty, 2),
                     'next_due_date' => $loan->next_due_date,
                     'status' => $loan->status,
                 ];
@@ -188,6 +198,7 @@ class ReportController extends Controller
             'count' => $rows->count(),
             'total_loan_amount' => round($rows->sum('loan_amount'), 2),
             'total_pending_emi' => round($rows->sum('pending_emi'), 2),
+            'total_due_today' => round($rows->sum('due_today'), 2),
             'total_pending_penalty' => round($rows->sum('pending_penalty'), 2),
             'total_due' => round($rows->sum('total_due'), 2),
             'rows' => $rows,

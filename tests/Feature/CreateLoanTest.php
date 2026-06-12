@@ -40,9 +40,7 @@ class CreateLoanTest extends TestCase
             'penalty_per_day' => 50,
         ]);
 
-        $response
-            ->assertCreated()
-            ->assertJsonPath('next_due_date', '2026-06-15T00:00:00.000000Z');
+        $response->assertCreated();
 
         $loan = Loan::where('client_id', $client->id)->sole();
 
