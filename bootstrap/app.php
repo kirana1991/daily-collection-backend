@@ -26,7 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return response()->json([
-                'message' => 'Uploaded file is too large. Please upload JPG, PNG, or PDF files up to 10 MB.',
+                'message' => 'Uploaded file is too large. Please upload JPG, PNG, or PDF files up to 25 MB.',
             ], 413);
         });
     })->create();

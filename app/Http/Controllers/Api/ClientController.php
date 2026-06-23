@@ -83,8 +83,8 @@ class ClientController extends Controller
             'guarantor_mobile' => ['nullable', 'string'],
             'aadhaar_number' => ['nullable', 'string'],
             'pan_number' => ['nullable', 'string'],
-            'aadhaar_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
-            'pan_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+            'aadhaar_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:25600'],
+            'pan_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:25600'],
             'date_of_birth' => ['nullable', 'date'],
             'verification_status' => ['nullable', 'in:pending,verified,high_confidence,blacklisted'],
             'notes' => ['nullable', 'string'],
@@ -129,10 +129,10 @@ class ClientController extends Controller
         return [
             'aadhaar_path.file' => 'Aadhaar photocopy must be a valid file.',
             'aadhaar_path.mimes' => 'Aadhaar photocopy must be JPG, PNG, or PDF.',
-            'aadhaar_path.max' => 'Aadhaar photocopy must be 10 MB or smaller.',
+            'aadhaar_path.max' => 'Aadhaar photocopy must be 25 MB or smaller.',
             'pan_path.file' => 'PAN photocopy must be a valid file.',
             'pan_path.mimes' => 'PAN photocopy must be JPG, PNG, or PDF.',
-            'pan_path.max' => 'PAN photocopy must be 10 MB or smaller.',
+            'pan_path.max' => 'PAN photocopy must be 25 MB or smaller.',
         ];
     }
 
