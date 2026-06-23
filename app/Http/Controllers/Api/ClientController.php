@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class ClientController extends Controller
 {
@@ -30,7 +33,7 @@ class ClientController extends Controller
 
     public function store(Request $request)
     {
-        $data = $request->validate($this->rules());
+        $data = $request->validate($this->rules(), $this->messages());
         $data['client_code'] = $data['client_code'] ?? $this->nextCode();
         $data = $this->storeClientDocuments($request, $data);
 
@@ -47,7 +50,7 @@ class ClientController extends Controller
 
     public function update(Request $request, Client $client)
     {
-        $data = $request->validate($this->rules(false));
+        $data = $request->validate($this->rules(false), $this->messages());
         $data = $this->storeClientDocuments($request, $data);
         $client->update($data);
 
@@ -80,8 +83,8 @@ class ClientController extends Controller
             'guarantor_mobile' => ['nullable', 'string'],
             'aadhaar_number' => ['nullable', 'string'],
             'pan_number' => ['nullable', 'string'],
-            'aadhaar_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:4096'],
-            'pan_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:4096'],
+            'aadhaar_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+            'pan_path' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
             'date_of_birth' => ['nullable', 'date'],
             'verification_status' => ['nullable', 'in:pending,verified,high_confidence,blacklisted'],
             'notes' => ['nullable', 'string'],
@@ -92,11 +95,45 @@ class ClientController extends Controller
     {
         foreach (['aadhaar_path', 'pan_path'] as $field) {
             if ($request->hasFile($field)) {
-                $data[$field] = $request->file($field)->store('client-documents', 'public');
+                $file = $request->file($field);
+
+                if (! $file->isValid()) {
+                    throw ValidationException::withMessages([
+                        $field => 'The selected document could not be uploaded. Please try a smaller or valid PDF/image file.',
+                    ]);
+                }
+
+                try {
+                    $data[$field] = $file->store('client-documents', 'public');
+                } catch (Throwable $exception) {
+                    Log::warning('Client document upload failed', [
+                        'field' => $field,
+                        'name' => $file->getClientOriginalName(),
+                        'size' => $file->getSize(),
+                        'mime' => $file->getMimeType(),
+                        'error' => $exception->getMessage(),
+                    ]);
+
+                    throw ValidationException::withMessages([
+                        $field => 'The document could not be saved. Please upload a smaller PDF/image or try again.',
+                    ]);
+                }
             }
         }
 
         return $data;
+    }
+
+    private function messages(): array
+    {
+        return [
+            'aadhaar_path.file' => 'Aadhaar photocopy must be a valid file.',
+            'aadhaar_path.mimes' => 'Aadhaar photocopy must be JPG, PNG, or PDF.',
+            'aadhaar_path.max' => 'Aadhaar photocopy must be 10 MB or smaller.',
+            'pan_path.file' => 'PAN photocopy must be a valid file.',
+            'pan_path.mimes' => 'PAN photocopy must be JPG, PNG, or PDF.',
+            'pan_path.max' => 'PAN photocopy must be 10 MB or smaller.',
+        ];
     }
 
     private function nextCode(): string
