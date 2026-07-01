@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -46,6 +47,20 @@ class ClientController extends Controller
             'employee',
             'loans' => fn ($loanQuery) => $loanQuery->with(['employee', 'responsibleUser', 'collections'])->orderByDesc('loan_date')->orderByDesc('id'),
         ]);
+    }
+
+    public function document(Request $request)
+    {
+        $data = $request->validate([
+            'path' => ['required', 'string'],
+        ]);
+        $path = ltrim($data['path'], '/');
+
+        abort_unless(str_starts_with($path, 'client-documents/'), 404);
+        abort_unless(Storage::disk('public')->exists($path), 404);
+        abort_unless(preg_match('/\.(jpe?g|png)$/i', $path), 404);
+
+        return Storage::disk('public')->response($path);
     }
 
     public function update(Request $request, Client $client)
