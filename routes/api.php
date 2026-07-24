@@ -20,6 +20,5 @@ Route::apiResource('clients', ClientController::class);
 Route::get('/client-documents', [ClientController::class, 'document']);
 Route::apiResource('loans', LoanController::class);
 Route::apiResource('collections', CollectionController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
-Route::get('/clients/{client}/ledger', [ReceiptController::class, 'ledger']);
 Route::post('/collections/{collection}/receipt', [ReceiptController::class, 'store']);
 Route::get('/reports/{type}', [ReportController::class, 'show']);

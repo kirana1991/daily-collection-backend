@@ -20,7 +20,7 @@ class ReceiptFlowTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_client_ledger_and_receipt_generation_work(): void
+    public function test_collection_receipt_generation_work(): void
     {
         Carbon::setTestNow('2026-06-12 10:00:00');
         $client = Client::create([
@@ -54,13 +54,6 @@ class ReceiptFlowTest extends TestCase
             'status' => 'approved',
         ]);
         $loan->rebuildCollectionAccounting();
-
-        $this->getJson("/api/clients/{$client->id}/ledger")
-            ->assertOk()
-            ->assertJsonPath('client.name', 'Test Client')
-            ->assertJsonPath('loan.loan_code', 'DM-L-0001')
-            ->assertJsonCount(1, 'ledger')
-            ->assertJsonPath('ledger.0.payment', 10);
 
         $this->postJson("/api/collections/{$collection->id}/receipt")
             ->assertCreated()

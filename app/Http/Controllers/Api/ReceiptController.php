@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Client;
 use App\Models\CollectionEntry;
 use App\Models\Loan;
 use App\Models\Receipt;
@@ -11,23 +10,6 @@ use Illuminate\Support\Facades\DB;
 
 class ReceiptController extends Controller
 {
-    public function ledger(Client $client)
-    {
-        $loan = $client->loans()->with('collections.employee')->latest()->firstOrFail();
-
-        return [
-            'client' => $client->load('employee'),
-            'loan' => $loan,
-            'ledger' => $this->ledgerRows($loan),
-            'summary' => [
-                'emi_outstanding' => round($loan->outstandingEmi(), 2),
-                'penalty_outstanding' => round($loan->outstandingPenalty(), 2),
-                'total_due' => round($loan->outstandingEmi() + $loan->outstandingPenalty(), 2),
-                'final_payable' => round($loan->force_closure_amount ?: ($loan->outstandingEmi() + $loan->outstandingPenalty()), 2),
-            ],
-        ];
-    }
-
     public function store(CollectionEntry $collection)
     {
         $collection->load(['client', 'loan.collections', 'employee', 'user']);
