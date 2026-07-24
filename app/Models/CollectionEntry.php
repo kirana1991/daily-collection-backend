@@ -12,6 +12,7 @@ class CollectionEntry extends Model
 
     protected $casts = [
         'collection_date' => 'date',
+        'emi_due_date' => 'date',
         'collected_at' => 'datetime',
     ];
 

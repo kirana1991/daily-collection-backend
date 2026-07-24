@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\CollectionEntry;
 use App\Models\Employee;
 use App\Models\Loan;
+use App\Models\Penalty;
 use Illuminate\Http\Request;
 
 class ReportController extends Controller
@@ -16,6 +17,12 @@ class ReportController extends Controller
         $date = $request->date('date') ?: now();
 
         return match ($type) {
+            'all' => $this->collectionReport(null, null, $request),
+            'today' => $this->collectionReport(now()->toDateString(), now()->toDateString(), $request),
+            'yesterday' => $this->collectionReport(now()->subDay()->toDateString(), now()->subDay()->toDateString(), $request),
+            'week' => $this->collectionReport(now()->startOfWeek()->toDateString(), now()->endOfWeek()->toDateString(), $request),
+            'month' => $this->collectionReport(now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString(), $request),
+            'custom' => $this->collectionReport($date->toDateString(), $date->toDateString(), $request),
             'daily' => $this->collectionReport($date->toDateString(), $date->toDateString(), $request),
             'weekly' => $this->collectionReport($date->copy()->startOfWeek()->toDateString(), $date->copy()->endOfWeek()->toDateString(), $request),
             'monthly' => $this->collectionReport($date->copy()->startOfMonth()->toDateString(), $date->copy()->endOfMonth()->toDateString(), $request),
@@ -23,11 +30,7 @@ class ReportController extends Controller
             'employee-locations' => $this->employeeLocationReport($date->toDateString(), $request),
             'employee-detail' => $this->employeeDetailReport((int) $request->query('employee_id'), $date->toDateString()),
             'pending-dues' => $this->pendingDuesReport($request),
-            'penalty' => ['rows' => Loan::where('status', 'active')->get()->map(fn ($loan) => [
-                'loan_code' => $loan->loan_code,
-                'client' => $loan->client?->name,
-                'penalty_outstanding' => round($loan->outstandingPenalty(), 2),
-            ])],
+            'penalty' => $this->penaltyReport($request),
             'employee' => ['rows' => Employee::where('role', 'collection_executive')->withCount('loans')->withSum('collections', 'amount_collected')->get()],
             'outstanding' => ['rows' => Loan::with('client')->where('status', 'active')->get()->map(fn ($loan) => [
                 'loan_code' => $loan->loan_code,
@@ -39,10 +42,10 @@ class ReportController extends Controller
         };
     }
 
-    private function collectionReport(string $from, string $to, Request $request): array
+    private function collectionReport(?string $from, ?string $to, Request $request): array
     {
         $rows = CollectionEntry::with(['client', 'loan', 'employee', 'user'])
-            ->whereBetween('collection_date', [$from, $to])
+            ->when($from && $to, fn ($query) => $query->whereBetween('collection_date', [$from, $to]))
             ->when($request->query('client_id'), fn ($query, $clientId) => $query->where('client_id', $clientId))
             ->when($request->query('employee_id'), fn ($query, $employeeId) => $query->where('employee_id', $employeeId))
             ->orderByDesc('collection_date')
@@ -161,6 +164,7 @@ class ReportController extends Controller
             ->where('status', 'active')
             ->when($request->query('client_id'), fn ($query, $clientId) => $query->where('client_id', $clientId))
             ->when($request->query('employee_id'), fn ($query, $employeeId) => $query->where('employee_id', $employeeId))
+            ->when($request->query('collector_user_id'), fn ($query, $collectorUserId) => $query->where('responsible_user_id', $collectorUserId))
             ->get()
             ->map(function (Loan $loan) {
                 $overdueInstallments = $loan->overdueInstallments();
@@ -175,7 +179,9 @@ class ReportController extends Controller
                     'employee' => $loan->employee,
                     'responsible_user' => $loan->responsibleUser,
                     'loan_amount' => (float) $loan->loan_amount,
+                    'emi_amount' => round($loan->scheduledInstallmentAmount(), 2),
                     'pending_emi' => $pendingEmi,
+                    'total_pending_emis' => $overdueInstallments->count(),
                     'overdue_installments_count' => $overdueInstallments->count(),
                     'overdue_installments' => $overdueInstallments->map(fn ($installment) => [
                         'id' => $installment->id,
@@ -190,17 +196,63 @@ class ReportController extends Controller
                     'status' => $loan->status,
                 ];
             })
-            ->filter(fn (array $loan) => $loan['total_due'] > 0)
-            ->sortByDesc('total_due')
+            ->filter(fn (array $loan) => $loan['total_pending_emis'] > 0)
+            ->sortByDesc('total_pending_emis')
             ->values();
 
         return [
             'count' => $rows->count(),
             'total_loan_amount' => round($rows->sum('loan_amount'), 2),
             'total_pending_emi' => round($rows->sum('pending_emi'), 2),
+            'total_pending_emis' => $rows->sum('total_pending_emis'),
             'total_due_today' => round($rows->sum('due_today'), 2),
             'total_pending_penalty' => round($rows->sum('pending_penalty'), 2),
             'total_due' => round($rows->sum('total_due'), 2),
+            'rows' => $rows,
+        ];
+    }
+
+    private function penaltyReport(Request $request): array
+    {
+        Loan::where('status', 'active')->get()->each(fn (Loan $loan) => $loan->syncCurrentPenalties());
+
+        $penalties = Penalty::with(['client', 'loan.employee', 'loan.responsibleUser'])
+            ->whereColumn('paid_amount', '<', 'penalty_amount')
+            ->when($request->query('client_id'), fn ($query, $clientId) => $query->where('client_id', $clientId))
+            ->when($request->query('loan_id'), fn ($query, $loanId) => $query->where('loan_id', $loanId))
+            ->when($request->query('collector_user_id'), fn ($query, $collectorUserId) => $query->whereHas('loan', fn ($loanQuery) => $loanQuery->where('responsible_user_id', $collectorUserId)))
+            ->orderBy('penalty_date')
+            ->get();
+
+        $rows = $penalties
+            ->groupBy('loan_id')
+            ->map(function ($loanPenalties) {
+                $firstPenalty = $loanPenalties->first();
+                $loan = $firstPenalty->loan;
+
+                return [
+                    'loan_id' => $loan?->id,
+                    'loan_code' => $loan?->loan_code,
+                    'client' => $firstPenalty->client,
+                    'collector' => $loan?->responsibleUser?->name ?: $loan?->employee?->name ?: 'Unassigned',
+                    'pending_penalty_count' => $loanPenalties->count(),
+                    'pending_penalty_amount' => round($loanPenalties->sum(fn (Penalty $penalty) => max(0, (float) $penalty->penalty_amount - (float) $penalty->paid_amount)), 2),
+                    'penalties' => $loanPenalties->map(fn (Penalty $penalty) => [
+                        'id' => $penalty->id,
+                        'emi_due_date' => $penalty->emi_due_date,
+                        'penalty_date' => $penalty->penalty_date,
+                        'penalty_amount' => (float) $penalty->penalty_amount,
+                        'paid_amount' => (float) $penalty->paid_amount,
+                        'pending_amount' => round(max(0, (float) $penalty->penalty_amount - (float) $penalty->paid_amount), 2),
+                        'status' => $penalty->status,
+                    ])->values(),
+                ];
+            })
+            ->values();
+
+        return [
+            'count' => $rows->count(),
+            'total_pending_penalty' => round($rows->sum('pending_penalty_amount'), 2),
             'rows' => $rows,
         ];
     }

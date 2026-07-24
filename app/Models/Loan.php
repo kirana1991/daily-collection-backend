@@ -270,14 +270,19 @@ class Loan extends Model
             $collectionDate = $collection->collection_date->copy()->startOfDay();
             $this->accruePenaltiesThrough($collectionDate);
             $remaining = (float) $collection->amount_collected;
-            $emiAmount = $this->applyInstallmentPayment($remaining, $collectionDate, dueOnly: true);
+            $appliedEmiDueDate = null;
+            [$emiAmount, $oldestDueDate] = $this->applyOldestDueInstallmentPayment($remaining, $collectionDate);
+            $appliedEmiDueDate = $oldestDueDate;
             $remaining -= $emiAmount;
             $penaltyAmount = min($remaining, $this->outstandingPenalty(false));
             $this->applyPenaltyPayment($penaltyAmount, false);
             $remaining -= $penaltyAmount;
-            $emiAmount += $this->applyInstallmentPayment($remaining, $collectionDate, dueOnly: false);
+            [$futureEmiAmount, $futureDueDate] = $this->applyInstallmentPayment($remaining);
+            $emiAmount += $futureEmiAmount;
+            $appliedEmiDueDate ??= $futureDueDate;
 
             $collection->update([
+                'emi_due_date' => $appliedEmiDueDate,
                 'emi_amount' => $emiAmount,
                 'penalty_amount' => $penaltyAmount,
             ]);
@@ -297,18 +302,39 @@ class Loan extends Model
         }
     }
 
-    private function applyInstallmentPayment(float $amount, Carbon $collectionDate, bool $dueOnly): float
+    private function applyOldestDueInstallmentPayment(float $amount, Carbon $collectionDate): array
+    {
+        if ($amount <= 0) {
+            return [0, null];
+        }
+
+        $installment = $this->installments()
+            ->whereColumn('paid_amount', '<', 'amount_due')
+            ->whereDate('due_date', '<=', $collectionDate->toDateString())
+            ->orderBy('due_date')
+            ->first();
+
+        if (! $installment) {
+            return [0, null];
+        }
+
+        $applied = min($amount, $installment->outstandingAmount());
+        $paidAmount = (float) $installment->paid_amount + $applied;
+        $installment->update([
+            'paid_amount' => $paidAmount,
+            'status' => $paidAmount >= (float) $installment->amount_due ? 'paid' : 'partial',
+        ]);
+
+        return [$applied, $installment->due_date->toDateString()];
+    }
+
+    private function applyInstallmentPayment(float $amount): array
     {
         $remaining = $amount;
+        $appliedDueDate = null;
         $query = $this->installments()
             ->whereColumn('paid_amount', '<', 'amount_due')
             ->orderBy('due_date');
-
-        if ($dueOnly) {
-            $query->whereDate('due_date', '<=', $collectionDate->toDateString());
-        } else {
-            $query->whereDate('due_date', '>', $collectionDate->toDateString());
-        }
 
         foreach ($query->get() as $installment) {
             if ($remaining <= 0) {
@@ -316,6 +342,7 @@ class Loan extends Model
             }
 
             $applied = min($remaining, $installment->outstandingAmount());
+            $appliedDueDate ??= $installment->due_date->toDateString();
             $paidAmount = (float) $installment->paid_amount + $applied;
             $installment->update([
                 'paid_amount' => $paidAmount,
@@ -324,12 +351,16 @@ class Loan extends Model
             $remaining -= $applied;
         }
 
-        return $amount - $remaining;
+        return [$amount - $remaining, $appliedDueDate];
     }
 
     public function collectionIntervalDays(): int
     {
-        return $this->loan_type === '100_days' ? 1 : 7;
+        return match ($this->loan_type) {
+            '100_days' => 1,
+            'monthly' => 30,
+            default => 7,
+        };
     }
 
     public function nextDueDateFrom(string $date): string
@@ -340,7 +371,7 @@ class Loan extends Model
     public function firstDueDateFrom(string $date): string
     {
         return Carbon::parse($date)
-            ->addDays($this->loan_type === '100_days' ? 0 : 7)
+            ->addDays($this->loan_type === '100_days' ? 0 : $this->collectionIntervalDays())
             ->toDateString();
     }
 }

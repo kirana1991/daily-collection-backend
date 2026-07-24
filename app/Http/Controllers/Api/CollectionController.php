@@ -14,20 +14,54 @@ class CollectionController extends Controller
     public function index(Request $request)
     {
         $data = $request->validate([
-            'period' => ['nullable', 'in:all,today,yesterday,month'],
+            'period' => ['nullable', 'in:all,today,yesterday,week,month'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'q' => ['nullable', 'string', 'max:120'],
+            'date' => ['nullable', 'date'],
+            'date_field' => ['nullable', 'in:payment,entry'],
+            'user_id' => ['nullable', 'integer', 'exists:users,id'],
         ]);
         $period = $data['period'] ?? 'all';
+        $dateColumn = ($data['date_field'] ?? 'payment') === 'entry'
+            ? DB::raw('COALESCE(collected_at, created_at)')
+            : 'collection_date';
         $query = CollectionEntry::with(['client', 'loan', 'employee', 'user', 'receipt']);
 
         if ($period === 'today') {
-            $query->whereDate('collection_date', now()->toDateString());
+            $query->whereDate($dateColumn, now()->toDateString());
         } elseif ($period === 'yesterday') {
-            $query->whereDate('collection_date', now()->subDay()->toDateString());
+            $query->whereDate($dateColumn, now()->subDay()->toDateString());
+        } elseif ($period === 'week') {
+            $query->whereDate($dateColumn, '>=', now()->startOfWeek()->toDateString());
         } elseif ($period === 'month') {
-            $query
-                ->whereYear('collection_date', now()->year)
-                ->whereMonth('collection_date', now()->month);
+            $query->whereDate($dateColumn, '>=', now()->startOfMonth()->toDateString());
+        }
+
+        if (! empty($data['date'])) {
+            $query->whereDate($dateColumn, $data['date']);
+        }
+
+        if (! empty($data['user_id'])) {
+            $query->where('user_id', $data['user_id']);
+        }
+
+        if (! empty($data['q'])) {
+            $search = $data['q'];
+
+            $query->where(function ($searchQuery) use ($search): void {
+                $searchQuery
+                    ->where('collection_mode', 'like', "%{$search}%")
+                    ->orWhereHas('client', fn ($clientQuery) => $clientQuery
+                        ->where('name', 'like', "%{$search}%")
+                        ->orWhere('client_code', 'like', "%{$search}%")
+                        ->orWhere('mobile', 'like', "%{$search}%"))
+                    ->orWhereHas('loan', fn ($loanQuery) => $loanQuery
+                        ->where('loan_code', 'like', "%{$search}%"))
+                    ->orWhereHas('user', fn ($userQuery) => $userQuery
+                        ->where('name', 'like', "%{$search}%"))
+                    ->orWhereHas('employee', fn ($employeeQuery) => $employeeQuery
+                        ->where('name', 'like', "%{$search}%"));
+            });
         }
 
         $totalAmount = (clone $query)->sum('amount_collected');

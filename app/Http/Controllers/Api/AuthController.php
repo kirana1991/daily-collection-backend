@@ -12,13 +12,13 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $credentials = $request->validate([
-            'email' => ['required', 'email'],
+            'mobile' => ['required', 'string'],
             'password' => ['required', 'string'],
         ]);
 
         $user = User::query()
             ->with('employee')
-            ->where('email', $credentials['email'])
+            ->where('mobile', $credentials['mobile'])
             ->where('status', 'active')
             ->first();
 
@@ -30,6 +30,7 @@ class AuthController extends Controller
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'mobile' => $user->mobile,
                 'email' => $user->email,
                 'role' => $user->role,
                 'employee_id' => $user->employee_id,

@@ -8,6 +8,7 @@ use App\Models\CollectionEntry;
 use App\Models\Employee;
 use App\Models\Loan;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
@@ -17,13 +18,14 @@ class DashboardController extends Controller
         $yesterday = now()->subDay()->toDateString();
         $startOfWeek = now()->startOfWeek()->toDateString();
         $startOfMonth = now()->startOfMonth()->toDateString();
+        $entryDateColumn = DB::raw('COALESCE(collected_at, created_at)');
         $activeLoans = Loan::where('status', 'active')->get();
 
         return [
             'metrics' => [
-                'today_collection' => CollectionEntry::whereDate('collection_date', $today)->sum('amount_collected'),
-                'week_collection' => CollectionEntry::whereDate('collection_date', '>=', $startOfWeek)->sum('amount_collected'),
-                'month_collection' => CollectionEntry::whereDate('collection_date', '>=', $startOfMonth)->sum('amount_collected'),
+                'today_collection' => CollectionEntry::whereDate($entryDateColumn, $today)->sum('amount_collected'),
+                'week_collection' => CollectionEntry::whereDate($entryDateColumn, '>=', $startOfWeek)->sum('amount_collected'),
+                'month_collection' => CollectionEntry::whereDate($entryDateColumn, '>=', $startOfMonth)->sum('amount_collected'),
                 'active_clients' => Client::whereHas('loans', fn ($query) => $query->where('status', 'active'))->count(),
                 'overdue_clients' => $activeLoans
                     ->filter(fn (Loan $loan) => $loan->overdueInstallments()->isNotEmpty())
@@ -34,10 +36,12 @@ class DashboardController extends Controller
                 'closed_loans' => Loan::where('status', 'closed')->count(),
                 'force_closure_cases' => Loan::where('status', 'force_closed')->count(),
             ],
-            'collections_graph' => CollectionEntry::selectRaw('collection_date, sum(amount_collected) as total')
-                ->groupBy('collection_date')
+            'collections_graph' => DB::table('collection_entries')
+                ->selectRaw('DATE(COALESCE(collected_at, created_at)) as collection_date, sum(amount_collected) as total')
+                ->whereDate(DB::raw('COALESCE(collected_at, created_at)'), '>=', $startOfWeek)
+                ->whereDate(DB::raw('COALESCE(collected_at, created_at)'), '<=', $today)
+                ->groupByRaw('DATE(COALESCE(collected_at, created_at))')
                 ->orderBy('collection_date')
-                ->limit(10)
                 ->get(),
             'employee_performance' => Employee::where('role', 'collection_executive')
                 ->withCount('loans')
@@ -61,9 +65,9 @@ class DashboardController extends Controller
                 }),
             'collection_by_user' => User::query()
                 ->withCount('collections')
-                ->withSum(['collections as today_collection' => fn ($query) => $query->whereDate('collection_date', $today)], 'amount_collected')
-                ->withSum(['collections as yesterday_collection' => fn ($query) => $query->whereDate('collection_date', $yesterday)], 'amount_collected')
-                ->withSum(['collections as month_collection' => fn ($query) => $query->whereDate('collection_date', '>=', $startOfMonth)], 'amount_collected')
+                ->withSum(['collections as today_collection' => fn ($query) => $query->whereDate(DB::raw('COALESCE(collected_at, created_at)'), $today)], 'amount_collected')
+                ->withSum(['collections as yesterday_collection' => fn ($query) => $query->whereDate(DB::raw('COALESCE(collected_at, created_at)'), $yesterday)], 'amount_collected')
+                ->withSum(['collections as month_collection' => fn ($query) => $query->whereDate(DB::raw('COALESCE(collected_at, created_at)'), '>=', $startOfMonth)], 'amount_collected')
                 ->orderBy('name')
                 ->get()
                 ->map(fn (User $user) => [

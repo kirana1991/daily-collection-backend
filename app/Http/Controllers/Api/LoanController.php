@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Client;
 use App\Models\Loan;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class LoanController extends Controller
 {
@@ -20,6 +22,14 @@ class LoanController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate($this->rules());
+        $client = Client::findOrFail($data['client_id']);
+
+        if ($client->verification_status !== 'verified') {
+            throw ValidationException::withMessages([
+                'client_id' => 'Client KYC must be fully verified before creating a loan.',
+            ]);
+        }
+
         $data['loan_code'] = $data['loan_code'] ?? $this->nextCode();
         $data['penalty_per_day'] = $data['penalty_per_day'] ?? 50;
         $data['status'] = $data['status'] ?? 'active';
@@ -38,11 +48,15 @@ class LoanController extends Controller
             'client',
             'employee',
             'responsibleUser',
+            'penalties' => fn ($query) => $query
+                ->whereColumn('paid_amount', '<', 'penalty_amount')
+                ->orderBy('penalty_date'),
             'collections' => fn ($query) => $query->with(['employee', 'user'])->orderByDesc('collection_date')->orderByDesc('collected_at'),
         ]);
 
         $loan->setAttribute('paid_emi', round($loan->paidEmi(), 2));
         $loan->setAttribute('paid_penalty', round($loan->paidPenalty(), 2));
+        $loan->setAttribute('collected_amount', round((float) $loan->collections()->sum('amount_collected'), 2));
         $loan->setAttribute('outstanding_emi', round($loan->outstandingEmi(), 2));
         $loan->setAttribute('accrued_penalty', round($loan->accruedPenalty(), 2));
         $loan->setAttribute('outstanding_penalty', round($loan->outstandingPenalty(), 2));
@@ -76,7 +90,7 @@ class LoanController extends Controller
             'responsible_user_id' => [$creating ? 'required' : 'sometimes', 'nullable', 'exists:users,id'],
             'loan_date' => [$creating ? 'required' : 'sometimes', 'date'],
             'loan_amount' => [$creating ? 'required' : 'sometimes', 'numeric', 'min:1'],
-            'loan_type' => ['nullable', 'in:100_days,weekly,custom'],
+            'loan_type' => ['nullable', 'in:100_days,weekly,monthly,custom'],
             'daily_collection_amount' => ['nullable', 'numeric', 'min:0'],
             'weekly_emi' => [$creating ? 'required' : 'sometimes', 'numeric', 'min:1'],
             'next_due_date' => $creating

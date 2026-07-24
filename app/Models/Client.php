@@ -12,6 +12,10 @@ class Client extends Model
 
     protected $casts = [
         'date_of_birth' => 'date',
+        'document_verification_details' => 'array',
+        'field_verification_details' => 'array',
+        'document_verified_at' => 'datetime',
+        'field_verified_at' => 'datetime',
     ];
 
     public function employee(): BelongsTo
